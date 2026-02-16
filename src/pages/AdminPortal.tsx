@@ -6,9 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { useCreateTask } from "@/hooks/useTasks";
 
 const AdminPortal = () => {
   const navigate = useNavigate();
+  const createTask = useCreateTask();
   const [channelName, setChannelName] = useState("");
   const [videoTitle, setVideoTitle] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
@@ -45,14 +47,37 @@ const AdminPortal = () => {
       toast.error("Fill in all required fields");
       return;
     }
-    toast.success("Task created successfully!");
-    setTimeout(() => navigate("/"), 1000);
+
+    const taskActions: { type: string; label: string; reward: number; required: boolean }[] = [];
+    if (actions.watch) taskActions.push({ type: "watch", label: "Watch full video", reward: baseReward, required: true });
+    if (actions.like) taskActions.push({ type: "like", label: "Like the video", reward: 0.05, required: false });
+    if (actions.subscribe) taskActions.push({ type: "subscribe", label: "Subscribe to channel", reward: 0.10, required: false });
+    if (actions.comment) taskActions.push({ type: "comment", label: "Leave a comment", reward: 0.15, required: false });
+
+    createTask.mutate(
+      {
+        channel_name: channelName,
+        video_title: videoTitle,
+        video_url: videoUrl,
+        video_duration: Number(videoDuration),
+        keywords,
+        actions: taskActions,
+        base_reward: baseReward,
+        total_reward: totalReward,
+      },
+      {
+        onSuccess: () => {
+          toast.success("Task created successfully!");
+          setTimeout(() => navigate("/"), 1000);
+        },
+        onError: (err: any) => toast.error(err.message),
+      }
+    );
   };
 
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        {/* Header */}
         <div className="flex items-center gap-3">
           <button onClick={() => navigate("/")} className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors">
             <ArrowLeft className="w-4 h-4 text-foreground" />
@@ -89,17 +114,13 @@ const AdminPortal = () => {
             <h2 className="text-sm font-semibold text-foreground">Keywords</h2>
             <div className="flex gap-2">
               <Input value={keywordInput} onChange={(e) => setKeywordInput(e.target.value)} placeholder="Add keyword" onKeyDown={(e) => e.key === "Enter" && addKeyword()} className="flex-1" />
-              <Button variant="secondary" size="icon" onClick={addKeyword}>
-                <Plus className="w-4 h-4" />
-              </Button>
+              <Button variant="secondary" size="icon" onClick={addKeyword}><Plus className="w-4 h-4" /></Button>
             </div>
             <div className="flex flex-wrap gap-2">
               {keywords.map((kw, i) => (
                 <span key={i} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground">
                   {kw}
-                  <button onClick={() => removeKeyword(i)}>
-                    <X className="w-3 h-3 text-muted-foreground hover:text-foreground" />
-                  </button>
+                  <button onClick={() => removeKeyword(i)}><X className="w-3 h-3 text-muted-foreground hover:text-foreground" /></button>
                 </span>
               ))}
             </div>
@@ -137,7 +158,7 @@ const AdminPortal = () => {
                 <p className="text-xs text-muted-foreground">Estimated reward per user</p>
                 <p className="stat-number text-2xl text-reward">${totalReward.toFixed(2)}</p>
               </div>
-              <Button onClick={handleSubmit} className="gap-2">
+              <Button onClick={handleSubmit} className="gap-2" disabled={createTask.isPending}>
                 <Plus className="w-4 h-4" /> Create Task
               </Button>
             </div>

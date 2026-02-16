@@ -1,19 +1,21 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { MOCK_TASKS, TaskAction } from "@/lib/types";
+import { useTask, useSubmitTask } from "@/hooks/useTasks";
+import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 import { ArrowLeft, ExternalLink, Eye, ThumbsUp, UserPlus, MessageSquare, CheckCircle2, Upload, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-const actionIcons = {
+const actionIcons: Record<string, typeof Eye> = {
   watch: Eye,
   like: ThumbsUp,
   subscribe: UserPlus,
   comment: MessageSquare,
 };
 
-const actionDescriptions = {
+const actionDescriptions: Record<string, string> = {
   watch: "Watch the entire video to completion",
   like: "Click the like button on the video",
   subscribe: "Subscribe to the channel",
@@ -23,167 +25,180 @@ const actionDescriptions = {
 const TaskExecution = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const task = MOCK_TASKS.find((t) => t.id === id);
-  const [actions, setActions] = useState<TaskAction[]>(task?.actions ?? []);
+  const { user } = useAuth();
+  const { data: task, isLoading } = useTask(id!);
+  const submitTask = useSubmitTask();
+  const [completedActions, setCompletedActions] = useState<Set<string>>(new Set());
   const [started, setStarted] = useState(false);
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
-  if (!task) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-muted-foreground">Task not found</p>
-      </div>
-    );
+  if (isLoading) {
+    return <div className="min-h-screen flex items-center justify-center bg-background"><p className="text-muted-foreground">Loading...</p></div>;
   }
 
+  if (!task) {
+    return <div className="min-h-screen flex items-center justify-center bg-background"><p className="text-muted-foreground">Task not found</p></div>;
+  }
+
+  const actions = task.task_actions?.sort((a, b) => a.sort_order - b.sort_order) ?? [];
   const completedReward = actions
-    .filter((a) => a.completed)
-    .reduce((sum, a) => sum + a.reward, 0);
+    .filter((a) => completedActions.has(a.type))
+    .reduce((sum, a) => sum + Number(a.reward), 0);
 
   const handleStart = () => {
     setStarted(true);
-    window.open(task.videoUrl, "_blank");
+    window.open(task.video_url, "_blank");
   };
 
-  const toggleAction = (index: number) => {
-    setActions((prev) =>
-      prev.map((a, i) => (i === index ? { ...a, completed: !a.completed } : a))
-    );
+  const toggleAction = (type: string) => {
+    setCompletedActions((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  };
+
+  const handleScreenshot = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    setUploading(true);
+    const filePath = `${user.id}/${task.id}-${Date.now()}.${file.name.split('.').pop()}`;
+    const { error } = await supabase.storage.from("screenshots").upload(filePath, file);
+    if (error) {
+      toast.error("Upload failed");
+    } else {
+      const { data: urlData } = supabase.storage.from("screenshots").getPublicUrl(filePath);
+      setScreenshotUrl(urlData.publicUrl);
+      toast.success("Screenshot uploaded");
+    }
+    setUploading(false);
   };
 
   const handleSubmit = () => {
-    const requiredDone = actions.filter((a) => a.required).every((a) => a.completed);
+    const requiredDone = actions.filter((a) => a.required).every((a) => completedActions.has(a.type));
     if (!requiredDone) {
       toast.error("Complete all required actions first");
       return;
     }
-    toast.success(`Task submitted! You earned $${completedReward.toFixed(2)}`);
-    setTimeout(() => navigate("/"), 1500);
+    submitTask.mutate(
+      {
+        task_id: task.id,
+        completed_actions: Array.from(completedActions),
+        earned_reward: completedReward,
+        screenshot_url: screenshotUrl ?? undefined,
+      },
+      {
+        onSuccess: () => {
+          toast.success(`Task submitted! You earned $${completedReward.toFixed(2)}`);
+          setTimeout(() => navigate("/"), 1500);
+        },
+        onError: (err: any) => toast.error(err.message),
+      }
+    );
   };
 
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        {/* Header */}
         <div className="flex items-center gap-3">
           <button onClick={() => navigate("/")} className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors">
             <ArrowLeft className="w-4 h-4 text-foreground" />
           </button>
           <div className="flex-1">
             <h1 className="text-lg font-semibold text-foreground">Task Details</h1>
-            <p className="text-xs text-muted-foreground">{task.channelName}</p>
+            <p className="text-xs text-muted-foreground">{task.channel_name}</p>
           </div>
           <div className="text-right">
             <p className="text-xs text-muted-foreground">Reward</p>
-            <p className="stat-number text-lg text-reward">${task.totalReward.toFixed(2)}</p>
+            <p className="stat-number text-lg text-reward">${Number(task.total_reward).toFixed(2)}</p>
           </div>
         </div>
 
-        {/* Video Info */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-5 space-y-4">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center text-lg font-bold text-foreground shrink-0">
-              {task.channelName.charAt(0)}
+              {task.channel_name.charAt(0)}
             </div>
             <div className="space-y-1 min-w-0">
-              <h2 className="font-semibold text-foreground leading-tight">{task.videoTitle}</h2>
+              <h2 className="font-semibold text-foreground leading-tight">{task.video_title}</h2>
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> {task.videoDuration} min
-                </span>
-                <span>Base: ${task.baseReward.toFixed(2)}</span>
+                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {task.video_duration} min</span>
+                <span>Base: ${Number(task.base_reward).toFixed(2)}</span>
               </div>
             </div>
           </div>
-
           <div className="flex flex-wrap gap-1.5">
-            {task.keywords.map((kw) => (
-              <span key={kw} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
-                {kw}
-              </span>
+            {task.keywords?.map((kw) => (
+              <span key={kw} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">{kw}</span>
             ))}
           </div>
-
           {!started ? (
             <Button onClick={handleStart} className="w-full gap-2">
               <ExternalLink className="w-4 h-4" /> Open Video & Start Task
             </Button>
           ) : (
             <div className="flex items-center gap-2 text-xs text-primary">
-              <div className="w-2 h-2 rounded-full bg-primary animate-pulse-glow" />
+              <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
               Task in progress — complete actions below
             </div>
           )}
         </motion.div>
 
-        {/* Actions */}
         <AnimatePresence>
           {started && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              className="space-y-3"
-            >
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="space-y-3">
               <h3 className="text-sm font-semibold text-foreground">Actions</h3>
               {actions.map((action, i) => {
-                const Icon = actionIcons[action.type];
+                const Icon = actionIcons[action.type] || Eye;
+                const completed = completedActions.has(action.type);
                 return (
                   <motion.button
-                    key={action.type}
+                    key={action.id}
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: i * 0.1 }}
-                    onClick={() => toggleAction(i)}
-                    className={`w-full glass-card p-4 flex items-center gap-4 text-left transition-all ${
-                      action.completed ? "glow-border" : ""
-                    }`}
+                    onClick={() => toggleAction(action.type)}
+                    className={`w-full glass-card p-4 flex items-center gap-4 text-left transition-all ${completed ? "glow-border" : ""}`}
                   >
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
-                      action.completed ? "bg-primary/20" : "bg-secondary"
-                    }`}>
-                      {action.completed ? (
-                        <CheckCircle2 className="w-5 h-5 text-primary" />
-                      ) : (
-                        <Icon className="w-5 h-5 text-muted-foreground" />
-                      )}
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${completed ? "bg-primary/20" : "bg-secondary"}`}>
+                      {completed ? <CheckCircle2 className="w-5 h-5 text-primary" /> : <Icon className="w-5 h-5 text-muted-foreground" />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-medium ${action.completed ? "text-primary" : "text-foreground"}`}>
-                        {action.label}
-                        {action.required && <span className="text-destructive ml-1">*</span>}
+                      <p className={`text-sm font-medium ${completed ? "text-primary" : "text-foreground"}`}>
+                        {action.label}{action.required && <span className="text-destructive ml-1">*</span>}
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        {actionDescriptions[action.type]}
-                      </p>
+                      <p className="text-xs text-muted-foreground">{actionDescriptions[action.type]}</p>
                     </div>
-                    <span className="stat-number text-sm text-reward shrink-0">
-                      +${action.reward.toFixed(2)}
-                    </span>
+                    <span className="stat-number text-sm text-reward shrink-0">+${Number(action.reward).toFixed(2)}</span>
                   </motion.button>
                 );
               })}
 
-              {/* Screenshot Upload */}
               <div className="glass-card p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <Upload className="w-4 h-4 text-muted-foreground" />
                   <span className="text-sm font-medium text-foreground">Verification Screenshot</span>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Upload a screenshot showing your completed actions for verification
-                </p>
-                <div className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/30 transition-colors">
-                  <Upload className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-xs text-muted-foreground">Click to upload screenshot</p>
-                </div>
+                <p className="text-xs text-muted-foreground">Upload a screenshot showing your completed actions</p>
+                {screenshotUrl ? (
+                  <img src={screenshotUrl} alt="Screenshot" className="rounded-lg max-h-40 object-cover" />
+                ) : (
+                  <label className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/30 transition-colors block">
+                    <Upload className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-xs text-muted-foreground">{uploading ? "Uploading..." : "Click to upload screenshot"}</p>
+                    <input type="file" accept="image/*" onChange={handleScreenshot} className="hidden" disabled={uploading} />
+                  </label>
+                )}
               </div>
 
-              {/* Submit */}
               <div className="glass-card p-4 flex items-center justify-between">
                 <div>
                   <p className="text-xs text-muted-foreground">Your reward</p>
                   <p className="stat-number text-xl text-reward">${completedReward.toFixed(2)}</p>
                 </div>
-                <Button onClick={handleSubmit} className="gap-2" disabled={completedReward === 0}>
+                <Button onClick={handleSubmit} className="gap-2" disabled={completedReward === 0 || submitTask.isPending}>
                   <CheckCircle2 className="w-4 h-4" /> Submit Task
                 </Button>
               </div>

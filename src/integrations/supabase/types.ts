@@ -106,7 +106,7 @@ export type Database = {
           video_duration: number
           video_thumbnail: string | null
           video_title: string
-          video_url: string
+          video_url: string | null
         }
         Insert: {
           base_reward: number
@@ -122,7 +122,7 @@ export type Database = {
           video_duration: number
           video_thumbnail?: string | null
           video_title: string
-          video_url: string
+          video_url?: string | null
         }
         Update: {
           base_reward?: number
@@ -138,7 +138,7 @@ export type Database = {
           video_duration?: number
           video_thumbnail?: string | null
           video_title?: string
-          video_url?: string
+          video_url?: string | null
         }
         Relationships: []
       }

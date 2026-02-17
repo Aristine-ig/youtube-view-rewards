@@ -81,8 +81,8 @@ export const useCreateTask = () => {
     mutationFn: async (taskData: {
       channel_name: string;
       video_title: string;
-      video_url: string;
       video_duration: number;
+      video_thumbnail?: string;
       keywords: string[];
       actions: { type: string; label: string; reward: number; required: boolean }[];
       base_reward: number;
@@ -94,8 +94,8 @@ export const useCreateTask = () => {
           created_by: user!.id,
           channel_name: taskData.channel_name,
           video_title: taskData.video_title,
-          video_url: taskData.video_url,
           video_duration: taskData.video_duration,
+          video_thumbnail: taskData.video_thumbnail ?? "",
           keywords: taskData.keywords,
           base_reward: taskData.base_reward,
           total_reward: taskData.total_reward,

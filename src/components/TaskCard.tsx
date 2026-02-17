@@ -27,6 +27,9 @@ const TaskCard = ({ task, index }: TaskCardProps) => {
       onClick={() => navigate(`/task/${task.id}`)}
     >
       <div className="relative h-36 bg-secondary overflow-hidden">
+        {task.video_thumbnail ? (
+          <img src={task.video_thumbnail} alt={task.video_title} className="absolute inset-0 w-full h-full object-cover" />
+        ) : null}
         <div className="absolute inset-0 bg-gradient-to-t from-card to-transparent z-10" />
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="w-12 h-12 rounded-full bg-primary/20 backdrop-blur-sm flex items-center justify-center border border-primary/30">

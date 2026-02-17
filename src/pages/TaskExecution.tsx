@@ -69,8 +69,8 @@ const TaskExecution = () => {
     if (error) {
       toast.error("Upload failed");
     } else {
-      const { data: urlData } = supabase.storage.from("screenshots").getPublicUrl(filePath);
-      setScreenshotUrl(urlData.publicUrl);
+      const { data: urlData } = await supabase.storage.from("screenshots").createSignedUrl(filePath, 3600);
+      setScreenshotUrl(urlData?.signedUrl ?? null);
       toast.success("Screenshot uploaded");
     }
     setUploading(false);
